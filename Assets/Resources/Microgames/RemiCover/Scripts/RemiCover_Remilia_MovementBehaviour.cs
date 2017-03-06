@@ -4,262 +4,403 @@ using UnityEngine;
 
 public class RemiCover_Remilia_MovementBehaviour : MonoBehaviour {
 
-    public float walkingSpeed;                      // Speed of Remilia's movement (Walking)
-    public float runningSpeed;                      // Speed of Remilia's movement (Running)
-    private float currentSpeed;                     // CurrentSpeed (Only useful for Running movement)
+    public float walkingSpeed;                      // Speed of Remilia's walking movement.
+    public float runningSpeed;                      // Speed of Remilia's running movement.
+    private float currentSpeed;                     // Remilia's currentSpeed (Only useful for Running movement)
     public float accelerationFactor;                // How much will CurrentSpeed increase until reaching runningSpeed?
     public float leftLimit, rightLimit;             // Minimum and Maximum value of Remilia's X position that she can take
 
-    // Probabilities for choosing, randomly, different movements for Remilia (Walking, Standing and Running)
-    public int walkProbability;                     // Must be between 0 and 100.
-    public int standProbability;                    // Must be between 0 and 100.
-                                                    // Running probabilty will be the remaining percentage
+    // Probabilities for choosing, randomly, different movements for Remilia
+    public int walkProbability;                     
+    public int standProbability;
+    public int runningProbabilty;
+    public int teleportProbability;
+    private int totalProbabilityValue;
 
     // Movement actions
-    private const int NONE = -1;                    // None selection
-    private const int WALK = 0;                     // Walk movement selection
-    private const int STAND = 1;                    // Standing movement selection 
-    private const int RUN = 2;                      // Run movement selection
-    private int lastMovementSelection = NONE;       // Last movement selected
-    private int previousMovementSelection = NONE;   // Previous movement selected
-    private bool isMoving = false;                  // Boolean to check if character is moving or not.
+    private enum movements { NONE, WALK, STAND, RUN, TELEPORT}      // Movements available
+    private int currentMovementSelection = (int) movements.NONE;    // Last movement selected
+    private int previousMovementSelection = (int) movements.NONE;   // Previous movement selected
+    private float movementTimer = 0;                                // How long will the selected movement be performed? (Will be assigned Randomly).
+    public float initialMovementDuration;                           // Duration of the first movement performed by default (STAND movement).
+    public float minimumMovementDuration;                           // Minimum value of movement timer can take initially.
+    public float maximumMovementDuration;                           // Maximum value of movement timer can take initially.
 
-    private float selectionTimer = 0;               // How long will the selected movement be performed? (Will be assigned Randomly).
-    public float min_selectionTimer;                // Minimum value of selectionTimer (on Initialization)
-    public float max_SelectionTimer;                // Maximum value of selectionTimer
-
-    private int movementDirection = 0;              // To specify where Remilia is moving (Left by default).
-    private const int LEFT = 0;                     // Left direction
-    private const int RIGHT = 1;                    // Right direction
-
-    private GameObject shadowObject = null;         // List of Gameobjects that in-game represents a Shadow
-    private GameObject remiliaSprite = null;        // Sprite of Remi
+    // Movement Direction
+    private enum movementDirections { LEFT, RIGHT } // To specify where Remilia is facing (Left by default).
+    private int currentMovementDirection = (int) movementDirections.LEFT;    
 
     private bool facingRight = true;                // To check if checking to the right 
-    private bool stopMovement = false;              // To stop movement
+
+    private Animator anim;
+
+    private Vector2 oldPosition;                            // To check if Remi has stopped his movement
 
 
     void Start()
     {
-        Vector2 mousePosition = CameraHelper.getCursorPosition();
-        this.transform.position = new Vector2(mousePosition.x, this.transform.position.y);
-        this.remiliaSprite = transform.Find("RemiSprite").gameObject;
-        this.shadowObject = GameObject.Find("Player/UmbrellaShadow");
-        this.lastMovementSelection = STAND;
-        this.selectionTimer = 0.5f;
+        this.totalProbabilityValue = standProbability + walkProbability + runningProbabilty + teleportProbability;
+        this.anim = GetComponent<Animator>();   
+        setInitialPosition();
+        setInitialMovement( (int) movements.STAND, initialMovementDuration);
+
     }
 
     // Update is called once per frame
     void Update()
     {
 
-        if (!stopMovement)
+        if (!MicrogameController.instance.getVictoryDetermined())
         {
             moveCharacter();
         }
 
+
     }
 
-    // Move character (Remilia)
+    /// <summary>
+    // Set the initial position of gameObject according to the position of the cursor
+    /// </summary>
+    private void setInitialPosition()
+    {
+        Vector2 mousePosition = CameraHelper.getCursorPosition();
+        transform.position = new Vector2(mousePosition.x, this.transform.position.y);
+    }
+
+
+    /// <summary>
+    /// Set the initial movement which Remilia will make And the time for which is going to make that movement
+    /// </summary>
+    private void setInitialMovement(int movement, float timer)
+    {
+        this.currentMovementSelection = movement;
+        this.movementTimer = timer;
+        this.previousMovementSelection = (int) movements.NONE;
+    }
+
+
+    /// <summary>
+    /// Make Remilia perform certain movement. If no movement is selected to be performed, then choose randomly a movement.
+    /// </summary>
     private void moveCharacter()
     {
-
-        if (lastMovementSelection == NONE)
+        if (currentMovementSelection == (int) movements.NONE)
         {
             chooseMovement();
+            changeMovementAnimation();
         }
 
-        else
-        {
-            continueMovement();
-        }
-
+        performMovement();
+        
     }
 
-    // Stop movement if character has died
-    private void characterHasDied()
-    {
-        stopMovement = true;
-    }
 
-    // Select one of the three options of movement (Walk, Stand or Run)
+    /// <summary>
+    /// Choose a movement for Remilia to perform. Standing movement won't be chosen twice in a row.
+    /// </summary>
     private void chooseMovement()
     {
 
-        int rnd_number = Random.Range(1, 101);                                  // Random, number between 1 and 100 (For probabilities)
-
-        if (hasWalkBeenSelected(rnd_number))
+        int rnd_number;
+        if (previousMovementSelection == (int) movements.STAND)
         {
-            chooseMovementDirection();
-            walkMovement();
-            lastMovementSelection = WALK;
+            rnd_number = Random.Range(0, totalProbabilityValue - walkProbability);
+        }
+        else
+        {
+            rnd_number = Random.Range(0, totalProbabilityValue);
         }
 
-        else if (standHasBeenSelected(rnd_number))
+
+        if (hasWalkingBeenSelected(rnd_number))
         {
-            standing();
-            lastMovementSelection = STAND;
+            Debug.Log("Walk");
+            chooseMovementDirection();
+            currentMovementSelection = (int) movements.WALK;
+        }
+
+        else if (hasRunningBeenSelected(rnd_number))
+        {
+            Debug.Log("Run");
+            chooseMovementDirection();
+            currentMovementSelection = (int) movements.RUN;
+        }
+
+        else if (hasTeleportBeenSelected(rnd_number))
+        {
+            Debug.Log("Teleport");
+            currentMovementSelection = (int) movements.TELEPORT;
         }
 
         else
         {
-            chooseMovementDirection();
-            runMovement();
-            lastMovementSelection = RUN;
+            Debug.Log("Stand");
+            currentMovementSelection = (int)movements.STAND;
         }
 
-        selectionTimer = Random.Range(min_selectionTimer, max_SelectionTimer);
+        movementTimer = Random.Range(minimumMovementDuration, maximumMovementDuration);
     }
 
-
-    // Continue movement that has been chosen previously.
-    private void continueMovement()
+    /// <summary>
+    /// Make Remilia perform the movement selected currently
+    /// </summary>
+    
+    private void performMovement()
     {
-        switch (lastMovementSelection)
+
+
+        switch (currentMovementSelection)
         {
-            case WALK:
-                walkMovement();
+            case (int) movements.WALK:
+                performWalkMovement();
                 break;
 
-            case STAND:
-                standing();
+            case (int) movements.STAND:
+                performStandingMovement();
                 break;
 
-            case RUN:
-                runMovement();
+            case (int)movements.TELEPORT:
+                Debug.Log("Perform Teleport");
+                performTeleportMovement();
+                break;
+
+            case (int)movements.RUN:
+                performRunMovement();
                 break;
         }
 
-        selectionTimer = selectionTimer - Time.deltaTime;
-        if (selectionTimer <= 0) { resetMovementSelectionParameters(); }
+        movementTimer = movementTimer - Time.deltaTime;
+        if (movementTimer <= 0 && currentMovementSelection != (int) movements.TELEPORT) { // Teleport is not affected by timer.
+            resetMovementSelectionParameters();
+        }
+
+            
+
     }
 
 
     public void resetMovementSelectionParameters()
     {
-
-        this.previousMovementSelection = this.lastMovementSelection;
-        this.lastMovementSelection = NONE;
-        this.isMoving = false;
-
+        this.previousMovementSelection = this.currentMovementSelection;
+        this.currentMovementSelection = (int) movements.NONE;
+        this.movementTimer = 0;
     }
 
-    // Check if Walk movement has been selected according to a number between 1 and 100.
-    private bool hasWalkBeenSelected(int number)
+    /// <summary>
+    /// Check if Walk movement has been selected.
+    /// </summary>
+    private bool hasWalkingBeenSelected(int number)
     {
-        int temp_walkProbability = 0;
-
-        if (previousMovementSelection == STAND)  // Standing move will not be selected twice in a row.
-        {
-            temp_walkProbability = this.walkProbability * 100 / (100 - this.standProbability);
-        }
-
-        else
-        {
-            temp_walkProbability = this.walkProbability;
-        }
-
-        if (number >= 1 && number <= temp_walkProbability)
-        {
-            return true;
-        }
-
-        return false;
+        return (number >= 0 && number < walkProbability);
     }
 
-    // Check if Standing movement has been selected according to a number between 1 and 100
-    private bool standHasBeenSelected(int number)
+    /// <summary>
+    /// Check if Running movement has been selected.
+    /// </summary>
+    private bool hasRunningBeenSelected(int number)
+    {
+        return (number >= walkProbability && number < (walkProbability + runningProbabilty));
+    }
+
+    /// <summary>
+    /// Check if Teleport movement has been selected.
+    /// </summary>
+    private bool hasTeleportBeenSelected(int number)
+    {
+        return (number >= (walkProbability + runningProbabilty) && number < (walkProbability + runningProbabilty + teleportProbability));
+    }
+
+    /// <summary>
+    /// Check if Standing movement has been selected.
+    /// </summary>
+    private bool hasStandingBeenSelected(int number)
+    {
+        return (number >= (walkProbability + runningProbabilty + teleportProbability) && number < totalProbabilityValue);
+    }
+
+    /// <summary>
+    /// Change movement animation
+    /// </summary>
+    private void changeMovementAnimation()
     {
 
-        if (previousMovementSelection == STAND) // Standing move will not be selected twice in a row.
+        switch (previousMovementSelection)
         {
-            return false;
+
+            case (int)movements.RUN:
+                if (currentMovementSelection != (int)movements.RUN)
+                {
+                    anim.SetBool("Run", false);
+                }
+                break;
+
+            case (int)movements.WALK:
+                if (currentMovementSelection != (int)movements.WALK)
+                {
+                    anim.SetBool("Walk", false);
+                }
+                break;
+
+            
+            case (int)movements.TELEPORT:
+                if (currentMovementSelection != (int)movements.TELEPORT)
+                {
+                    anim.SetBool("Teleport", false);
+                }
+                break;
+
         }
 
-        if (number > this.walkProbability && number <= this.standProbability + this.walkProbability)
+        switch (currentMovementSelection)
         {
-            return true;
-        }
+            case (int)movements.RUN:
+                anim.SetBool("Run", true);
+                break;
 
-        return false;
+            case (int)movements.WALK:
+                anim.SetBool("Walk", true);
+                break;
+
+            case (int)movements.TELEPORT:
+                anim.SetBool("Teleport", true);
+                break;
+
+            case (int)movements.STAND:
+                anim.SetBool("Run", false);
+                anim.SetBool("Walk", false);
+                anim.SetBool("Teleport", false);
+                break;
+        }
     }
 
 
-    // Make character walk
-    private void walkMovement()
+    /// <summary>
+    /// Perform Walking Movement
+    /// </summary>
+    private void performWalkMovement()
     {
+        anim.SetBool("Walk", true);
         var move = obtainMovementVector3();
-        Bounds remiBounds = this.GetComponent<BoxCollider2D>().bounds;
         this.transform.position = this.transform.position + (move * this.walkingSpeed * Time.deltaTime);
-        this.isMoving = true;
         this.currentSpeed = walkingSpeed;
         changeDirectionOnLimit();
+      
+    }
+
+    /// <summary>
+    /// Change the position of the character randomly. If the new position is near the previous position, then the new position is moved a little.
+    /// </summary>
+    private void changePosition()
+    {
+        float correction = 1.0f;
+        float newPosition;
+        do
+        {
+            newPosition = Random.Range(leftLimit, rightLimit);
+        } while (newPosition > transform.position.x - correction && newPosition < transform.position.x + correction);
+
+        
+        transform.position = new Vector2(newPosition, transform.position.y);
     }
 
 
-    // Make character stand
-    private void standing()
+    /// <summary>
+    /// Perform Standing Movement
+    /// </summary>
+    private void performStandingMovement()
     {
-        this.isMoving = false;
+        anim.SetBool("Walk", false);
+        anim.SetBool("Teleport", false);
+        anim.SetBool("Run", false);
         this.currentSpeed = 0;
     }
 
-
-    // Make caharacter run
-    private void runMovement()
+    /// <summary>
+    /// Perform Running movement
+    /// </summary>
+    private void performRunMovement()
     {
         var move = obtainMovementVector3();
-        Bounds remiBounds = this.GetComponent<BoxCollider2D>().bounds;
-        if (this.currentSpeed == 0) this.currentSpeed = walkingSpeed;
-        this.transform.position = this.transform.position + (move * this.currentSpeed * Time.deltaTime);
-        if (this.currentSpeed < this.runningSpeed) this.currentSpeed += this.accelerationFactor;
-        this.isMoving = true;
+        if (currentSpeed == 0)
+        {
+            this.currentSpeed = walkingSpeed;
+        }
+        else if (currentSpeed < runningSpeed)
+        {
+            this.currentSpeed += accelerationFactor;
+        }
+
+        this.transform.position = transform.position + (move * currentSpeed * Time.deltaTime);
         changeDirectionOnLimit();
     }
 
+    /// <summary>
+    /// Perform Teleport movement
+    /// </summary>
+    public void performTeleportMovement()
+    {
+        // Teleport movement is performed by Animator..-
 
-    // Choose Randomly a direction which the character will follow (LEFT or RIGHT, 0 or 1). Also, if character was walking or running previously, then it won't change direction.
+    }
+
+    /// <summary>
+    /// Gets called when teleport movement has ended
+    /// </summary>
+    public void endTeleportMovement()
+    {
+        anim.SetBool("Teleport", false);
+        resetMovementSelectionParameters();
+        this.currentSpeed = 0;
+    }
+
+    /// <summary>
+    /// Choose randomly a direction (Left or Right) which Remilia will follow. A new direction won't be chosen if the character was walking or running previously
+    /// </summary>
     private void chooseMovementDirection()
     {
-        if (!isMoving)
+        if (previousMovementSelection == (int) movements.WALK || previousMovementSelection == (int) movements.RUN)
         {
-            if (!(previousMovementSelection == WALK || previousMovementSelection == RUN))
-            {
-                this.movementDirection = Random.Range(0, 2); // LEFT = 0, RIGHT = 1
-
-                if ((this.movementDirection == RIGHT && facingRight == false) || (this.movementDirection == LEFT && facingRight == true))
-                {
-                    flipHorizontally();
-                }
-            }
+            return;
         }
+
+        this.currentMovementDirection = Random.Range(0, 2); // LEFT = 0, RIGHT = 1
+
+        if ((this.currentMovementDirection == (int)movementDirections.RIGHT && facingRight == false) ||
+            (this.currentMovementDirection == (int)movementDirections.LEFT && facingRight == true))
+        {
+            flipHorizontally();
+        }
+                   
     }
 
 
-    // Change direction of movement if character reach left or right limit
+    /// <summary>
+    /// Change movement direction if Remi reach the left or right limit.
+    /// </summary>
     private void changeDirectionOnLimit()
     {
 
-        if (this.transform.position.x <= leftLimit) this.movementDirection = RIGHT;
-        else if (this.transform.position.x >= rightLimit) this.movementDirection = LEFT;
+        if (this.transform.position.x <= leftLimit) this.currentMovementDirection = (int)movementDirections.RIGHT;
+        else if (this.transform.position.x >= rightLimit) this.currentMovementDirection = (int)movementDirections.LEFT;
 
-        if (this.movementDirection == RIGHT && facingRight == false) flipHorizontally();
-        else if (this.movementDirection == LEFT && facingRight == true) flipHorizontally();
-
+        if (this.currentMovementDirection == (int)movementDirections.RIGHT && facingRight == false) flipHorizontally();
+        else if (this.currentMovementDirection == (int)movementDirections.LEFT && facingRight == true) flipHorizontally();
     }
 
 
-    // Obtain movement vector according to direction
+    /// <summary>
+    /// Generate a movement vector that depends on the direction of the current movement.
+    /// </summary>
     private Vector3 obtainMovementVector3()
     {
         var move = new Vector3(0, 0, 0);
-        switch (this.movementDirection)
+        switch (this.currentMovementDirection)
         {
-            case LEFT:
+            case (int)movementDirections.LEFT:
                 move = new Vector3(-1, 0, 0);
                 break;
 
-            case RIGHT:
+            case (int)movementDirections.RIGHT:
                 move = new Vector3(1, 0, 0);
                 break;
         }
@@ -267,23 +408,28 @@ public class RemiCover_Remilia_MovementBehaviour : MonoBehaviour {
     }
 
 
-    // Flip horizontally character's sprite
+    /// <summary>
+    /// Flip Remilia's gameobject horizontally.
+    /// </summary>
     private void flipHorizontally()
     {
         if (facingRight)
         {
             facingRight = false;
-            remiliaSprite.transform.localRotation = Quaternion.Euler(0, 180, 0);
+            transform.localRotation = Quaternion.Euler(0, 180, 0);
         }
 
         else
         {
             facingRight = true;
-            remiliaSprite.transform.localRotation = Quaternion.Euler(0, 0, 0);
+            transform.localRotation = Quaternion.Euler(0, 0, 0);
         }
     }
 
-    // Limit character´s movement according to left and right limit
+
+    /// <summary>
+    /// Limit Remilia's movement to left and right limit
+    /// </summary>
     private void limitMovement()
     {
         this.transform.position = new Vector2(Mathf.Clamp(leftLimit, this.transform.position.x, rightLimit), this.transform.position.y);
